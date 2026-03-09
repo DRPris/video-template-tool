@@ -1,0 +1,61 @@
+services:
+  # Redis - Task queue
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 100mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - app-network
+
+  # API Server + Worker
+  api:
+    build: ./server
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - JWT_SECRET=${JWT_SECRET:-change-this-to-a-secure-random-string}
+      - JWT_EXPIRES_IN=7d
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - FFMPEG_CONCURRENCY=${FFMPEG_CONCURRENCY:-1}
+      - UPLOAD_DIR=./uploads
+      - FILE_RETENTION_DAYS=7
+      - MAX_FILE_SIZE=524288000
+    volumes:
+      - upload_data:/app/uploads
+      - db_data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  # Frontend (Nginx + reverse proxy)
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  upload_data:
+  db_data:
