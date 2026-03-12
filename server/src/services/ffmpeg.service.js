@@ -9,36 +9,39 @@ const TEMPLATE_DIMENSIONS = {
     '9:16': { width: 1080, height: 1920 },
 };
 
+// H.264 / yuv420p 要求宽高必须为偶数
+function toEven(n) {
+    const v = Math.round(n);
+    return v % 2 === 0 ? v : v + 1;
+}
+
 /**
  * Normalize template dimensions and video area to avoid invalid / legacy data.
- * @param {Object} template
- * @returns {{
- *   width:number,
- *   height:number,
- *   videoAreaX:number,
- *   videoAreaY:number,
- *   videoAreaWidth:number,
- *   videoAreaHeight:number
- * }}
+ * 所有输出维度都保证为偶数（H.264 编码要求）。
  */
 function normalizeTemplateGeometry(template) {
     const { type } = template;
-    // 强制使用标准尺寸，避免历史错误数据把 9:16 输出成 16:9。
     const canonical = TEMPLATE_DIMENSIONS[type] || {};
     const width = canonical.width || Number(template.width) || 1080;
     const height = canonical.height || Number(template.height) || 1920;
 
-    const rawX = Number(template.video_area_x) || 0;
-    const rawY = Number(template.video_area_y) || 0;
-    const rawW = Number(template.video_area_width) || width;
-    const rawH = Number(template.video_area_height) || height;
+    let rawX = Number(template.video_area_x) || 0;
+    let rawY = Number(template.video_area_y) || 0;
+    let rawW = Number(template.video_area_width) || width;
+    let rawH = Number(template.video_area_height) || height;
+
+    // 修复历史遗留数据：1:1 模板 540x960 at y=60 → 540x1080 at y=0
+    if (type === '1:1' && rawW === 540 && rawH === 960 && Math.abs(rawY - 60) <= 2) {
+        rawY = 0;
+        rawH = 1080;
+    }
 
     const videoAreaX = Math.max(0, Math.min(Math.floor(rawX), Math.max(width - 1, 0)));
     const videoAreaY = Math.max(0, Math.min(Math.floor(rawY), Math.max(height - 1, 0)));
     const maxW = Math.max(width - videoAreaX, 1);
     const maxH = Math.max(height - videoAreaY, 1);
-    const videoAreaWidth = Math.max(1, Math.min(Math.floor(rawW), maxW));
-    const videoAreaHeight = Math.max(1, Math.min(Math.floor(rawH), maxH));
+    const videoAreaWidth = toEven(Math.max(1, Math.min(Math.floor(rawW), maxW)));
+    const videoAreaHeight = toEven(Math.max(1, Math.min(Math.floor(rawH), maxH)));
 
     return { width, height, videoAreaX, videoAreaY, videoAreaWidth, videoAreaHeight };
 }
@@ -79,40 +82,38 @@ export function buildFFmpegArgs({ inputVideo, templateImage, outputPath, templat
     const { width, height, videoAreaX, videoAreaY, videoAreaWidth, videoAreaHeight } = normalizeTemplateGeometry(template);
 
     const args = [
-        '-y', // Overwrite output
+        '-y',
         '-i', inputVideo,
         '-i', templateImage,
     ];
 
+    // 过扫描：视频区域向外扩展几像素，消除视频与模板边缘之间的缝隙
+    const OVERSCAN = 4;
+    const osX = Math.max(0, videoAreaX - OVERSCAN / 2);
+    const osY = Math.max(0, videoAreaY - OVERSCAN / 2);
+    const osW = toEven(Math.min(videoAreaWidth + OVERSCAN, width - osX));
+    const osH = toEven(Math.min(videoAreaHeight + OVERSCAN, height - osY));
+
     let filterComplex;
 
     if (type === '9:16') {
-        // Template C: Fill the whole canvas without black bars (cover mode).
-        // We enlarge first, then center-crop to target size.
         filterComplex = [
-            // Normalize source SAR first to avoid unexpected stretching on mobile players.
-            `[0:v]scale=iw*sar:ih,setsar=1[src]`,
+            `[0:v]scale=trunc(iw*sar/2)*2:trunc(ih/2)*2,setsar=1[src]`,
             `[src]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[video]`,
-            // Align template to target canvas while keeping aspect ratio (avoid template stretching).
             `[1:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0,format=rgba[template]`,
-            // 显式设置 SAR / DAR，避免播放器把竖版误识别成横版。
-            `[video][template]overlay=0:0:format=auto,scale=${width}:${height}:flags=lanczos,setsar=1,setdar=${width}/${height}[outv]`,
+            `[video][template]overlay=0:0:format=auto,setsar=1,setdar=${width}/${height}[outv]`,
         ].join(';');
     } else {
-        // Template A (1:1) or Template B (16:9): Place video behind template
+        // 1:1 或 16:9：模糊背景 + 视频区域 + 模板叠加
         filterComplex = [
-            // Normalize source SAR first to avoid unexpected stretching on mobile players.
-            `[0:v]scale=iw*sar:ih,setsar=1[src]`,
-            // 先做一层铺满的模糊背景，避免出现黑边。
-            `[src]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},boxblur=25:12[bg]`,
-            // Fill designated area without black bars (cover mode).
-            `[src]scale=${videoAreaWidth}:${videoAreaHeight}:force_original_aspect_ratio=increase,crop=${videoAreaWidth}:${videoAreaHeight}[scaled_video]`,
-            // Place video on canvas at designated position
-            `[bg][scaled_video]overlay=${videoAreaX}:${videoAreaY}:shortest=1[with_video]`,
-            // Align template to target canvas while keeping aspect ratio (avoid template stretching).
+            `[0:v]scale=trunc(iw*sar/2)*2:trunc(ih/2)*2,setsar=1,split=2[bg_src][video_src]`,
+            // 模糊背景：先裁剪到画布尺寸，缩小 10 倍做高斯模糊再放大（节省 90% 算力）
+            `[bg_src]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},scale=w=trunc(iw/20)*2:h=trunc(ih/20)*2,gblur=sigma=10,scale=${width}:${height}:flags=fast_bilinear[bg]`,
+            // 视频缩放到过扫描尺寸（比标注区域略大），消除边缘缝隙
+            `[video_src]scale=${osW}:${osH}:force_original_aspect_ratio=increase,crop=${osW}:${osH}[scaled_video]`,
+            `[bg][scaled_video]overlay=${osX}:${osY}[with_video]`,
             `[1:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0,format=rgba[template]`,
-            // Overlay template (with transparency) on top
-            `[with_video][template]overlay=0:0:format=auto,scale=${width}:${height}:flags=lanczos,setsar=1,setdar=${width}/${height}[outv]`,
+            `[with_video][template]overlay=0:0:format=auto,setsar=1,setdar=${width}/${height}[outv]`,
         ].join(';');
     }
 
@@ -127,8 +128,6 @@ export function buildFFmpegArgs({ inputVideo, templateImage, outputPath, templat
         '-pix_fmt', 'yuv420p',
         '-map_metadata', '-1',
         '-metadata:s:v:0', 'rotate=0',
-        // 删除 H.264 的方向 side-data，防止部分播放器把竖版误显示成横版。
-        '-bsf:v', 'h264_metadata=display_orientation=remove',
         '-c:a', 'aac',
         '-b:a', '128k',
         '-movflags', '+faststart',
@@ -147,10 +146,14 @@ export function buildFFmpegArgs({ inputVideo, templateImage, outputPath, templat
  */
 export function processVideo({ inputVideo, templateImage, outputPath, template }, onProgress) {
     return new Promise((resolve, reject) => {
+        // 校验模板图片是否存在
+        if (!fs.existsSync(templateImage)) {
+            return reject(new Error(`模板图片不存在: ${templateImage}`));
+        }
+
         const expected = TEMPLATE_DIMENSIONS[template.type];
         if (expected) {
             const actual = readImageDimensions(templateImage);
-            // 运行时兜底校验：防止历史脏数据导致模板类型与图片尺寸不一致。
             if (!actual || actual.width !== expected.width || actual.height !== expected.height) {
                 return reject(new Error(
                     `模板尺寸异常: type=${template.type} 期望 ${expected.width}x${expected.height}，实际 ${actual ? `${actual.width}x${actual.height}` : '无法读取'}`
@@ -158,7 +161,11 @@ export function processVideo({ inputVideo, templateImage, outputPath, template }
             }
         }
 
-        // First, get video duration for progress calculation
+        // 校验输入视频是否存在
+        if (!fs.existsSync(inputVideo)) {
+            return reject(new Error(`输入视频不存在: ${inputVideo}`));
+        }
+
         const probeArgs = [
             '-v', 'error',
             '-show_entries', 'format=duration',
@@ -173,13 +180,12 @@ export function processVideo({ inputVideo, templateImage, outputPath, template }
             durationStr += data.toString();
         });
 
-        probe.on('close', (code) => {
-            const duration = parseFloat(durationStr.trim()) || 0;
-
-            // Ensure output directory exists
+        function runFFmpeg(duration) {
             fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
             const args = buildFFmpegArgs({ inputVideo, templateImage, outputPath, template });
+
+            console.log(`[FFmpeg] type=${template.type} cmd: ffmpeg ${args.join(' ')}`);
 
             const ffmpeg = spawn('ffmpeg', args);
             let stderr = '';
@@ -187,7 +193,6 @@ export function processVideo({ inputVideo, templateImage, outputPath, template }
             ffmpeg.stderr.on('data', (data) => {
                 stderr += data.toString();
 
-                // Parse progress from stderr
                 if (duration > 0 && onProgress) {
                     const timeMatch = data.toString().match(/time=(\d+):(\d+):(\d+)\.(\d+)/);
                     if (timeMatch) {
@@ -207,6 +212,7 @@ export function processVideo({ inputVideo, templateImage, outputPath, template }
                     onProgress && onProgress(100);
                     resolve(outputPath);
                 } else {
+                    console.error(`[FFmpeg] FAILED type=${template.type} code=${code}\n${stderr.slice(-1000)}`);
                     reject(new Error(`FFmpeg exited with code ${code}: ${stderr.slice(-500)}`));
                 }
             });
@@ -215,33 +221,21 @@ export function processVideo({ inputVideo, templateImage, outputPath, template }
                 reject(new Error(`FFmpeg spawn error: ${err.message}`));
             });
 
-            // Timeout
             const timeout = setTimeout(() => {
                 ffmpeg.kill('SIGKILL');
                 reject(new Error('FFmpeg processing timeout'));
             }, config.ffmpeg.timeout);
 
             ffmpeg.on('close', () => clearTimeout(timeout));
+        }
+
+        probe.on('close', () => {
+            const duration = parseFloat(durationStr.trim()) || 0;
+            runFFmpeg(duration);
         });
 
         probe.on('error', () => {
-            // If ffprobe fails, proceed without duration (no progress)
-            const args = buildFFmpegArgs({ inputVideo, templateImage, outputPath, template });
-            const ffmpeg = spawn('ffmpeg', args);
-            let stderr = '';
-
-            ffmpeg.stderr.on('data', (data) => { stderr += data.toString(); });
-
-            ffmpeg.on('close', (code) => {
-                if (code === 0) {
-                    onProgress && onProgress(100);
-                    resolve(outputPath);
-                } else {
-                    reject(new Error(`FFmpeg exited with code ${code}: ${stderr.slice(-500)}`));
-                }
-            });
-
-            ffmpeg.on('error', (err) => reject(new Error(`FFmpeg spawn error: ${err.message}`)));
+            runFFmpeg(0);
         });
     });
 }

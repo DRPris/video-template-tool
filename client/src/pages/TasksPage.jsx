@@ -139,34 +139,25 @@ export default function TasksPage() {
 
     const handleDownload = (taskId, videoId) => {
         const token = localStorage.getItem('token');
-        const url = taskAPI.downloadUrl(taskId, videoId);
-        // Use fetch to download with auth header
-        fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-            .then((res) => res.blob())
-            .then((blob) => {
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = `output_${videoId.slice(0, 8)}.mp4`;
-                a.click();
-                URL.revokeObjectURL(a.href);
-            })
-            .catch(() => toast('下载失败', 'error'));
+        const url = `${taskAPI.downloadUrl(taskId, videoId)}?token=${encodeURIComponent(token)}`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     };
 
     const handleDownloadAll = (taskId) => {
         const token = localStorage.getItem('token');
-        const url = taskAPI.downloadAllUrl(taskId);
+        const url = `${taskAPI.downloadAllUrl(taskId)}?token=${encodeURIComponent(token)}`;
         toast('正在打包下载...', 'info');
-        fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-            .then((res) => res.blob())
-            .then((blob) => {
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = `task_${taskId.slice(0, 8)}_videos.zip`;
-                a.click();
-                URL.revokeObjectURL(a.href);
-            })
-            .catch(() => toast('下载失败', 'error'));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     };
 
     const getOverallProgress = (task) => {

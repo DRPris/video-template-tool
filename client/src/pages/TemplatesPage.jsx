@@ -6,7 +6,7 @@ import { useToast } from '../App';
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const TYPE_INFO = {
-    '1:1': { label: '1:1 正方形', dims: '1080×1080', defaultVA: { x: 0, y: 60, w: 540, h: 960 } },
+    '1:1': { label: '1:1 正方形', dims: '1080×1080', defaultVA: { x: 0, y: 0, w: 608, h: 1080 } },
     '16:9': { label: '16:9 横版', dims: '1920×1080', defaultVA: { x: 656, y: 0, w: 608, h: 1080 } },
     '9:16': { label: '9:16 覆盖', dims: '1080×1920', defaultVA: { x: 0, y: 0, w: 1080, h: 1920 } },
 };

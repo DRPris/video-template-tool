@@ -1,3 +1,5 @@
+name: video-template-tool
+
 services:
   # Redis - Task queue
   redis:

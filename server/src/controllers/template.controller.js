@@ -92,8 +92,8 @@ export function createTemplate(req, res) {
 
     const vaX = parseInt(videoAreaX) || 0;
     const vaY = parseInt(videoAreaY) || 0;
-    const vaW = parseInt(videoAreaWidth) || (type === '1:1' ? 540 : type === '16:9' ? 608 : dims.width);
-    const vaH = parseInt(videoAreaHeight) || (type === '9:16' ? dims.height : 960);
+    const vaW = parseInt(videoAreaWidth) || (type === '1:1' ? 608 : type === '16:9' ? 608 : dims.width);
+    const vaH = parseInt(videoAreaHeight) || (type === '9:16' ? dims.height : (type === '1:1' ? 1080 : 1080));
 
     const relativePath = path.relative(config.upload.dir, req.file.path);
 
