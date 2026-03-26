@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+// 开发环境默认走本地后端 3000，避免 Vite 开发服务器把 /api 当成前端路由处理。
+const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3000' : '');
 
 const api = axios.create({
     baseURL: `${API_BASE}/api`,

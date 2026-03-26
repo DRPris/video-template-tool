@@ -1,6 +1,7 @@
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = import.meta.env.VITE_API_URL || window.location.origin;
+// 开发环境默认连接本地后端，避免误连到 Vite 前端端口。
+const SOCKET_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3000' : window.location.origin);
 
 let socket = null;
 

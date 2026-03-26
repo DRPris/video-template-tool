@@ -97,14 +97,27 @@ export function buildFFmpegArgs({ inputVideo, templateImage, outputPath, templat
     let filterComplex;
 
     if (type === '9:16') {
+        // 9:16 需要严格按模板视频区域落位，不能使用过扫描，否则会出现轻微位移
         filterComplex = [
-            `[0:v]scale=trunc(iw*sar/2)*2:trunc(ih/2)*2,setsar=1[src]`,
-            `[src]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[video]`,
+            `[0:v]scale=trunc(iw*sar/2)*2:trunc(ih/2)*2,setsar=1,split=2[bg_src][video_src]`,
+            `[bg_src]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[bg]`,
+            `[video_src]scale=${videoAreaWidth}:${videoAreaHeight}:force_original_aspect_ratio=increase,crop=${videoAreaWidth}:${videoAreaHeight}[scaled_video]`,
+            `[bg][scaled_video]overlay=${videoAreaX}:${videoAreaY}:format=auto[with_video]`,
             `[1:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0,format=rgba[template]`,
-            `[video][template]overlay=0:0:format=auto,setsar=1,setdar=${width}/${height}[outv]`,
+            `[with_video][template]overlay=0:0:format=auto,setsar=1,setdar=${width}/${height}[outv]`,
+        ].join(';');
+    } else if (type === '1:1') {
+        // 1:1 改为清晰底图，避免中间还能看到高斯模糊
+        filterComplex = [
+            `[0:v]scale=trunc(iw*sar/2)*2:trunc(ih/2)*2,setsar=1,split=2[bg_src][video_src]`,
+            `[bg_src]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[bg]`,
+            `[video_src]scale=${osW}:${osH}:force_original_aspect_ratio=increase,crop=${osW}:${osH}[scaled_video]`,
+            `[bg][scaled_video]overlay=${osX}:${osY}:format=auto[with_video]`,
+            `[1:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0,format=rgba[template]`,
+            `[with_video][template]overlay=0:0:format=auto,setsar=1,setdar=${width}/${height}[outv]`,
         ].join(';');
     } else {
-        // 1:1 或 16:9：模糊背景 + 视频区域 + 模板叠加
+        // 16:9：模糊背景 + 视频区域 + 模板叠加
         filterComplex = [
             `[0:v]scale=trunc(iw*sar/2)*2:trunc(ih/2)*2,setsar=1,split=2[bg_src][video_src]`,
             // 模糊背景：先裁剪到画布尺寸，缩小 10 倍做高斯模糊再放大（节省 90% 算力）

@@ -16,6 +16,27 @@ export const useAuth = () => useContext(AuthContext);
 const ToastContext = createContext(null);
 export const useToast = () => useContext(ToastContext);
 
+/**
+ * 安全读取本地缓存里的用户信息。
+ * 为什么要这样写：
+ * 之前接口地址错误时，可能把 "undefined" 这样的脏值写进 localStorage，
+ * 直接 JSON.parse 会让整个 React 首屏崩掉，页面就只剩黑屏。
+ */
+function getStoredUser() {
+  const raw = localStorage.getItem('user');
+  if (!raw || raw === 'undefined' || raw === 'null') {
+    localStorage.removeItem('user');
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    localStorage.removeItem('user');
+    return null;
+  }
+}
+
 function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
 
@@ -43,10 +64,7 @@ function ToastProvider({ children }) {
 }
 
 function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('user');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [user, setUser] = useState(() => getStoredUser());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

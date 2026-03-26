@@ -137,9 +137,22 @@ export default function TasksPage() {
         }
     };
 
-    const handleDownload = (taskId, videoId) => {
+    const handleDownload = async (taskId, videoId) => {
         const token = localStorage.getItem('token');
+        if (!token) { toast('请先登录', 'error'); return; }
         const url = `${taskAPI.downloadUrl(taskId, videoId)}?token=${encodeURIComponent(token)}`;
+        // 先用 HEAD 请求检查文件是否可下载，避免失败时浏览器跳转到错误 JSON 页面
+        try {
+            const check = await fetch(url, { method: 'HEAD' });
+            if (!check.ok) {
+                toast(check.status === 401 ? '登录已过期，请重新登录' :
+                      check.status === 404 ? '文件不存在或已过期' : '下载失败', 'error');
+                return;
+            }
+        } catch {
+            toast('网络连接失败，请检查服务器是否正常', 'error');
+            return;
+        }
         const a = document.createElement('a');
         a.href = url;
         a.download = '';
@@ -150,8 +163,10 @@ export default function TasksPage() {
 
     const handleDownloadAll = (taskId) => {
         const token = localStorage.getItem('token');
+        if (!token) { toast('请先登录', 'error'); return; }
         const url = `${taskAPI.downloadAllUrl(taskId)}?token=${encodeURIComponent(token)}`;
-        toast('正在打包下载...', 'info');
+        toast('正在打包下载，请稍候...', 'info');
+        // 用浏览器原生下载（流式传输），避免大 zip 占满内存
         const a = document.createElement('a');
         a.href = url;
         a.download = '';
