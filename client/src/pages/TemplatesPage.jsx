@@ -6,7 +6,9 @@ import { useToast } from '../App';
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const TYPE_INFO = {
-    '1:1': { label: '1:1 正方形', dims: '1080×1080', defaultVA: { x: 0, y: 0, w: 608, h: 1080 } },
+    // 1:1 模板：视频显示在透明区域，图案在不透明区域
+    // 视频 720×1080 (2:3) + 图案 360×1080 = 1080×1080，实际以模板透明区域为准
+    '1:1': { label: '1:1 正方形', dims: '1080×1080', defaultVA: { x: 0, y: 0, w: 720, h: 1080 } },
     '16:9': { label: '16:9 横版', dims: '1920×1080', defaultVA: { x: 656, y: 0, w: 608, h: 1080 } },
     '9:16': { label: '9:16 覆盖', dims: '1080×1920', defaultVA: { x: 0, y: 0, w: 1080, h: 1920 } },
 };

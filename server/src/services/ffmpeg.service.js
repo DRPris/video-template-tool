@@ -36,6 +36,20 @@ function normalizeTemplateGeometry(template) {
         rawH = 1080;
     }
 
+    // 修复 1:1 模板视频区域：确保视频区域与 720×1080 视频比例匹配
+    // 视频 720×1080 (2:3) + 模板图案 360×1080 = 1080×1080
+    if (type === '1:1') {
+        // 如果视频区域宽度等于画布宽度（1080），说明是未正确设置的遗留数据
+        if (rawW === width) {
+            rawW = 720; // 720×1080 = 2:3
+        }
+        // 确保视频区域高度填满整个画布高度
+        if (rawH < height) {
+            rawY = 0;
+            rawH = height;
+        }
+    }
+
     const videoAreaX = Math.max(0, Math.min(Math.floor(rawX), Math.max(width - 1, 0)));
     const videoAreaY = Math.max(0, Math.min(Math.floor(rawY), Math.max(height - 1, 0)));
     const maxW = Math.max(width - videoAreaX, 1);
@@ -66,6 +80,79 @@ function readImageDimensions(imagePath) {
     const height = Number(h);
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
     return { width, height };
+}
+
+/**
+ * 自动检测模板图片中透明区域的边界（用于精确放置视频）。
+ * 通过提取 alpha 通道，使用 cropdetect 找到不透明（图案）区域，
+ * 然后推算出透明区域的精确范围。
+ *
+ * 假设模板为左右两区结构：
+ *   - 透明区域（视频）在左侧或右侧
+ *   - 不透明区域（图案）在另一侧
+ *   - 两个区域高度都等于画布高度
+ *
+ * @param {string} imagePath - 模板图片路径
+ * @param {number} imgWidth - 图片宽度
+ * @param {number} imgHeight - 图片高度
+ * @returns {{x:number, y:number, width:number, height:number}|null}
+ */
+function detectTransparentArea(imagePath, imgWidth, imgHeight) {
+    try {
+        // 提取 alpha 通道，cropdetect 找到非黑色（即不透明/图案）区域
+        // alpha 通道中: 透明=0x00(黑), 不透明=0xFF(白)
+        // cropdetect 检测非黑色区域，即图案区域
+        const result = spawnSync('ffmpeg', [
+            '-y', '-i', imagePath,
+            '-filter_complex', 'alphaextract,cropdetect=limit=0:round=2:reset=1:skip=0',
+            '-frames:v', '1',
+            '-f', 'null', '-',
+        ], { encoding: 'utf-8', timeout: 10000 });
+
+        if (result.status !== 0 || !result.stderr) return null;
+
+        // 解析 cropdetect 输出: crop=w:h:x:y （这是不透明/图案区域）
+        const match = result.stderr.match(/crop=(\d+):(\d+):(\d+):(\d+)/);
+        if (!match) return null;
+
+        const opaqueW = parseInt(match[1]);
+        const opaqueH = parseInt(match[2]);
+        const opaqueX = parseInt(match[3]);
+        const opaqueY = parseInt(match[4]);
+
+        if (opaqueW <= 0 || opaqueH <= 0) return null;
+
+        console.log(`[Template] 不透明(图案)区域: x=${opaqueX}, y=${opaqueY}, ${opaqueW}×${opaqueH}`);
+
+        // 计算透明区域：图案区域的补集
+        // 对于左右两区结构：
+        let transX, transY, transW, transH;
+
+        if (opaqueX > 0) {
+            // 图案在右侧，透明区域在左侧
+            transX = 0;
+            transY = 0;
+            transW = opaqueX;
+            transH = imgHeight;
+        } else {
+            // 图案在左侧（从 x=0 开始），透明区域在右侧
+            transX = opaqueX + opaqueW;
+            transY = 0;
+            transW = imgWidth - transX;
+            transH = imgHeight;
+        }
+
+        transW = toEven(transW);
+        transH = toEven(transH);
+
+        if (transW <= 0 || transH <= 0) return null;
+
+        console.log(`[Template] 透明(视频)区域: x=${transX}, y=${transY}, ${transW}×${transH} (模板 ${imgWidth}×${imgHeight})`);
+        return { x: transX, y: transY, width: transW, height: transH };
+    } catch (err) {
+        console.warn(`[Template] 透明区域检测失败: ${err.message}`);
+        return null;
+    }
 }
 
 /**
@@ -107,12 +194,33 @@ export function buildFFmpegArgs({ inputVideo, templateImage, outputPath, templat
             `[with_video][template]overlay=0:0:format=auto,setsar=1,setdar=${width}/${height}[outv]`,
         ].join(';');
     } else if (type === '1:1') {
-        // 1:1 改为清晰底图，避免中间还能看到高斯模糊
+        // 1:1 竖版视频套方版模板：
+        // 自动检测模板透明区域，确保视频精确填充到透明区域，与图案部分无缝衔接
+        let vaX = videoAreaX;
+        let vaY = videoAreaY;
+        let vaW = videoAreaWidth;
+        let vaH = videoAreaHeight;
+
+        // 自动检测模板透明区域边界，优先使用实际透明区域尺寸
+        const detected = detectTransparentArea(templateImage, width, height);
+        if (detected) {
+            vaX = detected.x;
+            vaY = detected.y;
+            vaW = detected.width;
+            vaH = detected.height;
+            console.log(`[FFmpeg] 1:1 使用自动检测的透明区域: (${vaX},${vaY}) ${vaW}×${vaH}`);
+        } else {
+            console.log(`[FFmpeg] 1:1 透明区域检测失败，使用数据库值: (${vaX},${vaY}) ${vaW}×${vaH}`);
+        }
+
+        // 不使用过扫描，直接强制缩放视频到精确的透明区域尺寸，确保无缝填充
         filterComplex = [
             `[0:v]scale=trunc(iw*sar/2)*2:trunc(ih/2)*2,setsar=1,split=2[bg_src][video_src]`,
+            // 背景：将视频拉伸填满整个画布（无缝覆盖，避免任何黑色间隙）
             `[bg_src]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}[bg]`,
-            `[video_src]scale=${osW}:${osH}:force_original_aspect_ratio=increase,crop=${osW}:${osH}[scaled_video]`,
-            `[bg][scaled_video]overlay=${osX}:${osY}:format=auto[with_video]`,
+            // 视频：强制缩放到精确的透明区域尺寸，确保无缝填充
+            `[video_src]scale=${vaW}:${vaH}[scaled_video]`,
+            `[bg][scaled_video]overlay=${vaX}:${vaY}:format=auto[with_video]`,
             `[1:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black@0,format=rgba[template]`,
             `[with_video][template]overlay=0:0:format=auto,setsar=1,setdar=${width}/${height}[outv]`,
         ].join(';');
