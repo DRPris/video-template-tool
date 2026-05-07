@@ -80,6 +80,47 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
   CREATE INDEX IF NOT EXISTS idx_task_videos_task_id ON task_videos(task_id);
   CREATE INDEX IF NOT EXISTS idx_task_videos_status ON task_videos(status);
+
+  -- Video Resize 功能表
+  CREATE TABLE IF NOT EXISTS resize_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT UNIQUE NOT NULL,
+    user_id INTEGER NOT NULL,
+    source_ratio TEXT NOT NULL,
+    target_ratio TEXT NOT NULL CHECK(target_ratio IN ('1:1', '16:9', '9:16')),
+    mode TEXT NOT NULL DEFAULT 'center' CHECK(mode IN ('center', 'smart')),
+    status TEXT DEFAULT 'queued' CHECK(status IN ('queued', 'processing', 'completed', 'failed', 'cancelled')),
+    total_videos INTEGER NOT NULL DEFAULT 0,
+    completed_videos INTEGER NOT NULL DEFAULT 0,
+    failed_videos INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_at DATETIME,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS resize_videos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    video_id TEXT UNIQUE NOT NULL,
+    original_filename TEXT NOT NULL,
+    input_path TEXT NOT NULL,
+    output_path TEXT,
+    source_width INTEGER,
+    source_height INTEGER,
+    target_width INTEGER,
+    target_height INTEGER,
+    crop_path TEXT,
+    status TEXT DEFAULT 'queued' CHECK(status IN ('queued', 'analyzing', 'processing', 'completed', 'failed')),
+    error_message TEXT,
+    progress_percent INTEGER DEFAULT 0,
+    started_at DATETIME,
+    completed_at DATETIME,
+    FOREIGN KEY (task_id) REFERENCES resize_tasks(task_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_resize_tasks_user_id ON resize_tasks(user_id);
+  CREATE INDEX IF NOT EXISTS idx_resize_tasks_status ON resize_tasks(status);
+  CREATE INDEX IF NOT EXISTS idx_resize_videos_task_id ON resize_videos(task_id);
 `);
 
 export default db;

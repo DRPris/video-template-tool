@@ -8,6 +8,7 @@ import config from './config/index.js';
 import authRoutes from './routes/auth.routes.js';
 import templateRoutes from './routes/template.routes.js';
 import taskRoutes from './routes/task.routes.js';
+import resizeRoutes from './routes/resize.routes.js';
 
 const app = express();
 
@@ -32,6 +33,7 @@ app.use('/uploads', express.static(config.upload.dir));
 app.use('/api/auth', authRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/tasks', taskRoutes);
+app.use('/api/resize', resizeRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

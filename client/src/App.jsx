@@ -6,6 +6,7 @@ import LoginPage from './pages/LoginPage';
 import WorkspacePage from './pages/WorkspacePage';
 import TasksPage from './pages/TasksPage';
 import TemplatesPage from './pages/TemplatesPage';
+import ResizePage from './pages/ResizePage';
 import './index.css';
 
 // Auth Context
@@ -138,6 +139,9 @@ function Sidebar() {
         <NavLink to="/templates" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
           <span className="nav-icon">🖼</span> 模板库
         </NavLink>
+        <NavLink to="/resize" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <span className="nav-icon">🔄</span> 视频 Resize
+        </NavLink>
       </nav>
 
       <div className="sidebar-footer">
@@ -177,6 +181,7 @@ function App() {
             <Route path="/workspace" element={<ProtectedRoute><WorkspacePage /></ProtectedRoute>} />
             <Route path="/tasks" element={<ProtectedRoute><TasksPage /></ProtectedRoute>} />
             <Route path="/templates" element={<ProtectedRoute><TemplatesPage /></ProtectedRoute>} />
+            <Route path="/resize" element={<ProtectedRoute><ResizePage /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/workspace" replace />} />
           </Routes>
         </AuthProvider>

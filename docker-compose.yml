@@ -23,6 +23,9 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
+      # 前端地址（用于 Socket.IO CORS 校验）
+      # 本地 docker-compose 通过 frontend 反代对外暴露 80 端口，所以这里用 http://localhost 最直观
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost}
       - JWT_SECRET=${JWT_SECRET:-change-this-to-a-secure-random-string}
       - JWT_EXPIRES_IN=7d
       - REDIS_HOST=redis

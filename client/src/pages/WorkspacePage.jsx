@@ -45,6 +45,7 @@ export default function WorkspacePage() {
     const [videoFiles, setVideoFiles] = useState([]);
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
+    const [processingServer, setProcessingServer] = useState(false);
     const [showRejectedModal, setShowRejectedModal] = useState(false);
     const [rejectedFileDetails, setRejectedFileDetails] = useState([]);
     const toast = useToast();
@@ -131,6 +132,7 @@ export default function WorkspacePage() {
 
         setUploading(true);
         setUploadProgress(0);
+        setProcessingServer(false);
 
         const formData = new FormData();
         const templateIds = selectedTemplates.map(t => t.id).join(',');
@@ -143,6 +145,10 @@ export default function WorkspacePage() {
             await taskAPI.create(formData, (progressEvent) => {
                 const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
                 setUploadProgress(percent);
+                // 上传字节到达100%后，还需等待服务器处理（写库、入队等）
+                if (percent >= 100) {
+                    setProcessingServer(true);
+                }
             });
 
             toast(`已提交 ${videoFiles.length} 个视频到处理队列！`, 'success');
@@ -152,6 +158,7 @@ export default function WorkspacePage() {
             toast(err.response?.data?.error || '提交失败', 'error');
         } finally {
             setUploading(false);
+            setProcessingServer(false);
         }
     };
 
@@ -277,14 +284,26 @@ export default function WorkspacePage() {
             {uploading && (
                 <div className="upload-progress-overlay">
                     <div className="upload-progress-card">
-                        <div className="upload-icon">📤</div>
-                        <h3 style={{ marginBottom: 12 }}>正在上传视频文件...</h3>
-                        <div className="progress-bar" style={{ marginBottom: 8 }}>
-                            <div className="progress-fill" style={{ width: `${uploadProgress}%` }}></div>
-                        </div>
-                        <div style={{ color: 'var(--color-text-secondary)', fontSize: 14 }}>
-                            {uploadProgress}%
-                        </div>
+                        {processingServer ? (
+                            <>
+                                <div className="upload-icon spinner">⚙️</div>
+                                <h3 style={{ marginBottom: 12 }}>服务器处理中，请稍候...</h3>
+                                <div style={{ color: 'var(--color-text-secondary)', fontSize: 14 }}>
+                                    文件已上传完毕，正在创建处理任务
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <div className="upload-icon">📤</div>
+                                <h3 style={{ marginBottom: 12 }}>正在上传视频文件...</h3>
+                                <div className="progress-bar" style={{ marginBottom: 8 }}>
+                                    <div className="progress-fill" style={{ width: `${uploadProgress}%` }}></div>
+                                </div>
+                                <div style={{ color: 'var(--color-text-secondary)', fontSize: 14 }}>
+                                    {uploadProgress}%
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             )}

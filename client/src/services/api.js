@@ -63,4 +63,22 @@ export const taskAPI = {
     downloadAllUrl: (taskId) => `${API_BASE}/api/tasks/${taskId}/download-all`,
 };
 
+// Resize API
+export const resizeAPI = {
+    create: (formData, onProgress) => api.post('/resize', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300000,
+        onUploadProgress: onProgress,
+    }),
+    list: () => api.get('/resize'),
+    get: (id) => api.get(`/resize/${id}`),
+    updateCropPath: (taskId, videoId, keyframes) =>
+        api.put(`/resize/${taskId}/videos/${videoId}/crop-path`, { keyframes }),
+    retry: (id) => api.post(`/resize/${id}/retry`),
+    delete: (id) => api.delete(`/resize/${id}`),
+    downloadUrl: (taskId, videoId) => `${API_BASE}/api/resize/${taskId}/download/${videoId}`,
+    downloadAllUrl: (taskId) => `${API_BASE}/api/resize/${taskId}/download-all`,
+    probe: (videoPath) => api.get('/resize/probe', { params: { path: videoPath } }),
+};
+
 export default api;
