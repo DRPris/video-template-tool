@@ -16,6 +16,22 @@ services:
     networks:
       - app-network
 
+  # CV 智能裁切微服务 (Python)
+  cv-service:
+    build: ./cv-service
+    restart: unless-stopped
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - UPLOAD_DIR=/app/uploads
+    volumes:
+      - upload_data:/app/uploads
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+
   # API Server + Worker
   api:
     build: ./server
@@ -40,6 +56,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      cv-service:
+        condition: service_started
     networks:
       - app-network
 
