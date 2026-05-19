@@ -152,12 +152,48 @@ export function deleteTemplate(req, res) {
         return res.status(400).json({ error: '该模板正在被使用，无法删除' });
     }
 
-    // Delete template file
-    const fullPath = path.join(config.upload.dir, template.file_path);
-    if (fs.existsSync(fullPath)) {
-        fs.unlinkSync(fullPath);
-    }
+    try {
+        // Use a transaction to clean up related records and delete the template
+        const deleteTransaction = db.transaction(() => {
+            // Clean up files and records for each related task
+            const relatedTasks = db.prepare('SELECT task_id FROM tasks WHERE template_id = ?').all(req.params.id);
+            for (const task of relatedTasks) {
+                // Delete output directory
+                const outputDir = path.join(config.upload.outputsDir, task.task_id);
+                if (fs.existsSync(outputDir)) {
+                    fs.rmSync(outputDir, { recursive: true, force: true });
+                }
 
-    db.prepare('DELETE FROM templates WHERE id = ?').run(req.params.id);
-    res.json({ message: '模板已删除' });
+                // Delete input video files
+                const videos = db.prepare('SELECT * FROM task_videos WHERE task_id = ?').all(task.task_id);
+                for (const v of videos) {
+                    const inputPath = path.join(config.upload.dir, v.input_path);
+                    if (fs.existsSync(inputPath)) {
+                        try { fs.unlinkSync(inputPath); } catch (e) { /* ignore */ }
+                    }
+                }
+
+                // Delete task_videos records
+                db.prepare('DELETE FROM task_videos WHERE task_id = ?').run(task.task_id);
+            }
+
+            // Delete tasks that reference this template
+            db.prepare('DELETE FROM tasks WHERE template_id = ?').run(req.params.id);
+
+            // Delete template file
+            const fullPath = path.join(config.upload.dir, template.file_path);
+            if (fs.existsSync(fullPath)) {
+                fs.unlinkSync(fullPath);
+            }
+
+            // Delete the template record
+            db.prepare('DELETE FROM templates WHERE id = ?').run(req.params.id);
+        });
+
+        deleteTransaction();
+        res.json({ message: '模板已删除' });
+    } catch (err) {
+        console.error('删除模板失败:', err);
+        res.status(500).json({ error: '删除模板失败: ' + err.message });
+    }
 }
