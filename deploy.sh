@@ -34,29 +34,52 @@ if [ "$TOTAL_MEM" -lt 4000 ]; then
     fi
 fi
 
-# 3. Generate JWT secret
-JWT_SECRET=$(openssl rand -hex 32)
-echo "🔐 JWT 密钥已生成"
+# 3. Generate JWT secret (or keep existing one)
+if [ -f .env ] && grep -q JWT_SECRET .env; then
+    JWT_SECRET=$(grep JWT_SECRET .env | cut -d= -f2)
+    echo "🔐 使用已有 JWT 密钥"
+else
+    JWT_SECRET=$(openssl rand -hex 32)
+    echo "🔐 JWT 密钥已生成"
+fi
 
-# 4. Create .env file
+# 4. Auto-detect optimal FFmpeg concurrency
+CPU_CORES=$(nproc)
+AUTO_CONCURRENCY=$((CPU_CORES > 2 ? CPU_CORES - 1 : 1))
+FFMPEG_CONCURRENCY=${FFMPEG_CONCURRENCY:-$AUTO_CONCURRENCY}
+echo "🖥  检测到 ${CPU_CORES} 核 CPU，FFmpeg 并发设为 ${FFMPEG_CONCURRENCY}"
+
+# 5. Create .env file
 cat > .env << EOF
 JWT_SECRET=${JWT_SECRET}
-FFMPEG_CONCURRENCY=1
+FFMPEG_CONCURRENCY=${FFMPEG_CONCURRENCY}
 EOF
 echo "✅ .env 配置已创建"
 
-# 5. Build and start
+# 6. Build and start
 echo "🔨 构建 Docker 镜像（首次可能需要 5-10 分钟）..."
 docker compose build --no-cache
 
 echo "🚀 启动服务..."
 docker compose up -d
 
-# 6. Wait for services to be ready
+# Restore data if backup files exist
+if [ -f /root/backup_db.tar.gz ]; then
+    echo "📦 检测到数据库备份，正在恢复..."
+    docker compose stop
+    DB_PATH=$(docker volume inspect video-template-tool_db_data --format '{{ .Mountpoint }}')
+    UPLOAD_PATH=$(docker volume inspect video-template-tool_upload_data --format '{{ .Mountpoint }}')
+    tar xzf /root/backup_db.tar.gz -C "$DB_PATH"
+    [ -f /root/backup_uploads.tar.gz ] && tar xzf /root/backup_uploads.tar.gz -C "$UPLOAD_PATH"
+    echo "✅ 数据恢复完成"
+    docker compose up -d
+fi
+
+# 7. Wait for services to be ready
 echo "⏳ 等待服务启动..."
 sleep 10
 
-# 7. Health check
+# 8. Health check
 if curl -sf http://localhost/api/health > /dev/null 2>&1; then
     echo ""
     echo "╔══════════════════════════════════════════╗"

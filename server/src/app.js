@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import multer from 'multer';
 import path from 'path';
+import fs from 'fs';
 import config from './config/index.js';
 import authRoutes from './routes/auth.routes.js';
 import templateRoutes from './routes/template.routes.js';
@@ -11,6 +12,16 @@ import taskRoutes from './routes/task.routes.js';
 import resizeRoutes from './routes/resize.routes.js';
 
 const app = express();
+
+// Ensure upload directories exist
+import fs from 'fs';
+const dirs = [config.upload.dir, config.upload.videosDir, config.upload.templatesDir, config.upload.outputsDir];
+for (const d of dirs) {
+  if (!fs.existsSync(d)) {
+    fs.mkdirSync(d, { recursive: true });
+    console.log(`Created missing upload directory: ${d}`);
+  }
+}
 
 // Security
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
